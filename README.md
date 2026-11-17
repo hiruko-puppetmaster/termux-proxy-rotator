@@ -37,18 +37,17 @@ AI client -> 127.0.0.1:9090 -> priority/cooldown pool -> upstream provider
 - A reachable local or remote OpenAI-compatible upstream
 - No root, no cgo, no external libraries
 
-Copy this project directory into Termux (for example with `git`, `scp`, or
-shared storage), then run the commands below from that directory.
+The quick start below clones the repository; `docs/USAGE.md` covers manual
+copies and the full operating guide.
 
 ## Quick start in Termux
 
 ```bash
 pkg update
-pkg install -y golang
+pkg install -y golang git
 
-# Put the project in your home directory, for example:
-#   ~/termux-proxy-rotator
-cd ~/termux-proxy-rotator
+git clone https://github.com/hiruko-puppetmaster/termux-proxy-rotator.git
+cd termux-proxy-rotator
 
 cp config.example.json config.json
 nano config.json                 # edit the upstreams
