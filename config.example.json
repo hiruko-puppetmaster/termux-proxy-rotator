@@ -1,0 +1,57 @@
+{
+  "listen": "127.0.0.1:9090",
+  "admin_listen": "127.0.0.1:9091",
+  "max_attempts": 6,
+  "max_request_bytes": 33554432,
+  "upstream_header_timeout_seconds": 120,
+  "max_cooldown_seconds": 600,
+  "client_api_key": "",
+  "log_level": "info",
+  "retry_statuses": [429, 403, 502, 503],
+  "cooldown_seconds": {
+    "429": 30,
+    "403": 120,
+    "502": 10,
+    "503": 15,
+    "network": 10,
+    "default": 15
+  },
+  "upstreams": [
+    {
+      "name": "opencode2api",
+      "base_url": "http://127.0.0.1:8080/v1",
+      "priority": 0
+    },
+    {
+      "name": "openai-primary",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "${OPENAI_API_KEY}",
+      "priority": 10
+    },
+    {
+      "name": "openai-secondary",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "${OPENAI_API_KEY_2}",
+      "priority": 10,
+      "enabled": false
+    },
+    {
+      "name": "openrouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": "${OPENROUTER_API_KEY}",
+      "priority": 20,
+      "enabled": false,
+      "headers": {
+        "HTTP-Referer": "http://localhost",
+        "X-Title": "Termux Proxy Rotator"
+      }
+    },
+    {
+      "name": "groq",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key": "${GROQ_API_KEY}",
+      "priority": 30,
+      "enabled": false
+    }
+  ]
+}
