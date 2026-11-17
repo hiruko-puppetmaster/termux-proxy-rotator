@@ -4,6 +4,179 @@ This guide walks through installing, configuring, testing, and operating the
 proxy on Android/Termux. The short version is in [README.md](../README.md);
 this document focuses on doing it correctly in real-world setups.
 
+## Automatic OpenCode setup (recommended)
+
+If you already use OpenCode in Termux, the installer can build the proxy,
+detect your local upstreams, start the background service, and register the
+provider in one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hiruko-puppetmaster/termux-proxy-rotator/main/install-opencode.sh |
+  bash
+```
+
+You can also clone the repository and run the installer locally:
+
+```bash
+git clone https://github.com/hiruko-puppetmaster/termux-proxy-rotator.git
+cd termux-proxy-rotator
+bash install-opencode.sh
+```
+
+### What it changes
+
+The installer writes two kinds of files: the proxy runtime and the OpenCode
+configuration.
+
+| Path | Purpose |
+| --- | --- |
+| `~/.local/bin/proxy-rotator` | Proxy binary (`$PREFIX/bin` when writable) |
+| `~/.local/bin/opencode-apply` | JSONC/config helper used by the installer |
+| `~/.config/opencode/rotator/config.json` | Generated pool config, mode `600` |
+| `~/.config/opencode/rotator/env.sh` | Upstream and client keys, mode `600` |
+| `~/.config/opencode/rotator/client.key` | Random proxy token, mode `600` |
+| `~/.config/opencode/rotator/start.sh` | Starts the proxy in the background |
+| `~/.config/opencode/rotator/stop.sh` | Stops the proxy |
+| `~/.config/opencode/rotator/rotator.log` | Request and failover log |
+| `~/.config/opencode/opencode.jsonc` | Adds `providers.rotator` and the default model |
+| `~/.config/opencode/opencode.jsonc.bak` | First-run backup, kept for reverting |
+
+Upstream keys are expanded from `env.sh` at runtime; they are not copied into
+`config.json`. The proxy still listens on loopback only and requires the random
+`client.key` on its port.
+
+### Upstream detection order
+
+1. If `ROTATOR_UPSTREAM_URL` is set, the installer uses that upstream. It also
+   prompts for the key when the URL is not loopback and no key was supplied.
+2. Otherwise it looks for an opencode2api gateway config in
+   `~/opencode2api/config.json`, `~/.config/opencode2api/config.json`,
+   `~/.local/share/opencode2api/config.json`, and the Termux home fallback
+   `/data/data/com.termux/files/home/opencode2api/config.json`. It reads
+   `server_keys[0]` and builds the URL from `listen`.
+3. It looks for an OpenCode Zen key in
+   `$XDG_DATA_HOME/opencode/auth.json`, `~/.local/share/opencode/auth.json`, and
+   the Termux home fallback.
+4. If both are found, opencode2api gets priority `0` and direct Zen gets
+   priority `10`, so the local gateway is preferred and direct Zen is the
+   fallback.
+5. If nothing is found, the installer prompts for a base URL and key. Without
+   a terminal it exits with instructions for a non-interactive install.
+
+`ROTATOR_ADD_DETECTED=1` adds the detected opencode2api and Zen entries after a
+custom `ROTATOR_UPSTREAM_URL`, with priorities `10` and `20`.
+
+### Custom or unattended install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hiruko-puppetmaster/termux-proxy-rotator/main/install-opencode.sh |
+  ROTATOR_UPSTREAM_URL='https://api.example.com/v1' \
+  ROTATOR_UPSTREAM_KEY='sk-...' bash
+```
+
+The same values can be passed as flags when running a local checkout:
+
+```bash
+bash install-opencode.sh \
+  --upstream-url 'https://api.example.com/v1' \
+  --upstream-key 'sk-...'
+```
+
+### Installer options
+
+| Option | Environment variable | Meaning |
+| --- | --- | --- |
+| `--keep-default` | `ROTATOR_KEEP_DEFAULT=1` | Do not change OpenCode's default model |
+| `--port N` | `ROTATOR_PORT=N` | Proxy port (default `9090`) |
+| `--admin-port N` | `ROTATOR_ADMIN_PORT=N` | Admin/status port (default `9091`) |
+| `--runtime DIR` | `ROTATOR_HOME=DIR` | Runtime directory |
+| `--bin-dir DIR` | `ROTATOR_BIN_DIR=DIR` | Where to install the binaries |
+| `--config PATH` | `OPENCODE_CONFIG=PATH` | OpenCode config file to edit |
+| `--source DIR` | `ROTATOR_SOURCE=DIR` | Build from a local checkout |
+| `--upstream-url URL` | `ROTATOR_UPSTREAM_URL=URL` | Use this upstream |
+| `--upstream-key KEY` | `ROTATOR_UPSTREAM_KEY=KEY` | Key for the custom upstream |
+| `--prefer-model ID` | `ROTATOR_PREFER_MODEL=ID` | Preferred default model |
+| `--default-model ID` | `ROTATOR_DEFAULT_MODEL=ID` | Required default model |
+| `--no-start` | `ROTATOR_SKIP_START=1` | Do not start the proxy |
+| `--no-deps` | `ROTATOR_SKIP_DEPS=1` | Do not run `pkg install` |
+| `--no-verify` | `ROTATOR_SKIP_VERIFY=1` | Skip the final `opencode models` check |
+| — | `ROTATOR_ADD_DETECTED=1` | Add detected upstreams after a custom one |
+| — | `ROTATOR_MODELS_FILE=PATH` | Use a saved `/v1/models` response (testing) |
+
+The installer is idempotent. Rerunning it rebuilds the binaries, stops the old
+proxy, regenerates the runtime files, starts the proxy again, and updates the
+provider block. The first `opencode.jsonc.bak` is preserved so it still
+represents the configuration from before the first install.
+
+### Default model selection
+
+Unless `--keep-default` is used, the installer sets the top-level `"model"`
+value to `rotator/<model>`. It chooses in this order:
+
+1. `--default-model ID`, which fails if the model is absent,
+2. an existing `rotator/<model>` default that is still present in the catalog,
+3. `--prefer-model ID` (default `deepseek-v4.1-flash-free`),
+4. the first model in the sorted catalog.
+
+All models returned by the rotator's `/v1/models` endpoint are registered as
+OpenCode models. Metadata such as context limits, input modalities, tool use,
+and reasoning efforts is copied from the catalog.
+
+### Verify the result
+
+```bash
+~/.config/opencode/rotator/start.sh
+curl -s http://127.0.0.1:9091/status
+
+opencode models | grep '^rotator/'
+opencode run -m rotator/deepseek-v4.1-flash-free "Reply with exactly: OK"
+opencode run "Reply with exactly: DEFAULT OK"
+```
+
+The installer runs `opencode models` automatically when `opencode` is on
+`PATH`. If OpenCode was already running, it normally hot-reloads the provider;
+restart it if the new models do not appear.
+
+### Revert or uninstall
+
+Restore the pre-install OpenCode configuration:
+
+```bash
+cp ~/.config/opencode/opencode.jsonc.bak ~/.config/opencode/opencode.jsonc
+```
+
+To keep the provider but use another default, remove the top-level `"model"`
+line or set it to the model you want. To remove the runtime entirely:
+
+```bash
+~/.config/opencode/rotator/stop.sh
+rm -rf ~/.config/opencode/rotator
+rm -f ~/.local/bin/proxy-rotator ~/.local/bin/opencode-apply
+```
+
+### Automatic setup troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| `pkg: command not found` | Run the installer from Termux, not another Linux shell |
+| `pkg` refuses to run as root | Do not run the installer as root; use the normal Termux user |
+| `bind: address already in use` | Change `--port`/`--admin-port`, or stop the old instance |
+| No upstream detected | Set `ROTATOR_UPSTREAM_URL`/`ROTATOR_UPSTREAM_KEY`, or run interactively |
+| Model catalog returns `401` | The gateway key changed; rerun the installer so `env.sh` is refreshed |
+| `opencode models` does not show `rotator/*` | Check `--config`/`OPENCODE_CONFIG`, then restart OpenCode |
+| Default model is rejected | Rerun with `--prefer-model` naming a model from `opencode models` |
+| Proxy did not start | Read `~/.config/opencode/rotator/rotator.log` |
+| `--no-start` left OpenCode unchanged | Start the proxy, then rerun the installer; or pass `ROTATOR_MODELS_FILE` |
+
+### Security notes for the automatic setup
+
+- `env.sh`, `client.key`, and `config.json` are mode `600` and live in your
+  home directory.
+- The proxy and admin ports bind to `127.0.0.1`.
+- The admin endpoint is unauthenticated; never expose it on a network.
+- The generated provider uses a file reference (`{file:...}`) for the proxy
+  token, so the token is not duplicated in `opencode.jsonc`.
+
 ## 1. What the proxy does
 
 The proxy accepts OpenAI-compatible HTTP requests on loopback and forwards

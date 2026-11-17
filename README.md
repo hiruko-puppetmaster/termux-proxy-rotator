@@ -12,6 +12,73 @@ AI client -> 127.0.0.1:9090 -> priority/cooldown pool -> upstream provider
                               `-- key/endpoint B (200) -> streamed back
 ```
 
+## One-command OpenCode setup (Termux)
+
+If OpenCode is already installed, paste this into Termux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hiruko-puppetmaster/termux-proxy-rotator/main/install-opencode.sh | bash
+```
+
+The installer:
+
+1. installs `golang` and `git` with `pkg` when they are missing,
+2. clones or updates this repository under `~/.local/share/termux-proxy-rotator`,
+3. builds `proxy-rotator` and the `opencode-apply` config helper,
+4. detects the opencode2api gateway (`~/opencode2api/config.json`) and the
+   OpenCode Zen key (`~/.local/share/opencode/auth.json`),
+5. writes the runtime config and keys to `~/.config/opencode/rotator`,
+6. starts the proxy in the background with `nohup`,
+7. registers `providers.rotator` in `~/.config/opencode/opencode.jsonc` and
+   sets the default model to `rotator/deepseek-v4.1-flash-free` when available.
+
+The JSONC editor preserves comments and unrelated settings, and the installer
+is idempotent: rerunning it updates the proxy and keeps an existing
+`opencode.jsonc.bak` from the first run.
+
+If no local upstream is detected, the installer asks for a base URL and API
+key. For unattended installs, provide them yourself:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hiruko-puppetmaster/termux-proxy-rotator/main/install-opencode.sh |
+  ROTATOR_UPSTREAM_URL='https://api.example.com/v1' \
+  ROTATOR_UPSTREAM_KEY='sk-...' bash
+```
+
+Common options (run `bash install-opencode.sh --help` for all of them):
+
+| Option | Meaning |
+| --- | --- |
+| `--keep-default` | Leave OpenCode's current default model unchanged |
+| `--port N` | Proxy port; default `9090` |
+| `--admin-port N` | Status/control port; default `9091` |
+| `--config PATH` | OpenCode config file to edit |
+| `--runtime DIR` | Runtime directory; default `~/.config/opencode/rotator` |
+| `--upstream-url URL` | Use this upstream instead of auto-detected ones |
+| `--upstream-key KEY` | API key for `--upstream-url` |
+| `--no-start` | Install files without starting the proxy |
+
+After installation:
+
+```bash
+~/.config/opencode/rotator/start.sh
+~/.config/opencode/rotator/stop.sh
+curl -s http://127.0.0.1:9091/status
+
+opencode models | grep '^rotator/'
+opencode run -m rotator/deepseek-v4.1-flash-free "hello"
+```
+
+The generated `env.sh` and `client.key` are mode `600`; upstream keys are not
+stored in `config.json`. Revert OpenCode with:
+
+```bash
+cp ~/.config/opencode/opencode.jsonc.bak ~/.config/opencode/opencode.jsonc
+```
+
+See the [automatic setup section](docs/USAGE.md#automatic-opencode-setup-recommended)
+for detection order, file layout, and troubleshooting.
+
 ## Features
 
 - **Endpoint + credential pool.** Multiple base URLs and API keys, priority
@@ -33,12 +100,15 @@ AI client -> 127.0.0.1:9090 -> priority/cooldown pool -> upstream provider
 
 ## Requirements
 
-- Termux with `golang` (Go 1.22 or newer)
+- Termux (the installer can install `golang` and `git` with `pkg`)
 - A reachable local or remote OpenAI-compatible upstream
+- OpenCode for the automatic integration; the proxy itself works with any
+  OpenAI-compatible client
 - No root, no cgo, no external libraries
 
 The quick start below clones the repository; `docs/USAGE.md` covers manual
-copies and the full operating guide.
+copies and the full operating guide. The one-command installer above is the
+easiest path when you already use OpenCode.
 
 ## Quick start in Termux
 
@@ -422,7 +492,12 @@ make build
 
 Tests cover path joining, priority round-robin, cooldown backoff and
 `Retry-After`, 403/429/502/503 failover, network-error failover, body replay,
-SSE flush behavior, client auth token stripping, and the admin endpoints.
+SSE flush behavior, client auth token stripping, admin endpoints, JSONC editing
+with comments and trailing commas, idempotent OpenCode provider updates, and
+upstream credential detection.
+
+The `install-opencode.sh` path does not need `jq`; JSON work is done by the
+bundled Go helper.
 
 ## License
 
